@@ -67,8 +67,12 @@ def get_history(prompt_id):
 
 
 def wait_for_prompt(client_id, prompt_id):
+    """Wait for prompt to complete. Returns dict of node_id -> elapsed_seconds."""
     ws = websocket.WebSocket()
     ws.connect(f"ws://{COMFY_HOST}/ws?clientId={client_id}")
+    node_timings = {}
+    current_node = None
+    node_start = None
     try:
         for _ in range(COMFY_POLLING_MAX_RETRIES):
             out = ws.recv()
@@ -76,11 +80,22 @@ def wait_for_prompt(client_id, prompt_id):
                 msg = json.loads(out)
                 if msg.get("type") == "executing":
                     data = msg.get("data", {})
-                    if data.get("node") is None and data.get("prompt_id") == prompt_id:
+                    if data.get("prompt_id") != prompt_id:
+                        continue
+                    node = data.get("node")
+                    now = time.time()
+                    # Record duration of previous node
+                    if current_node and node_start:
+                        node_timings[current_node] = round(now - node_start, 2)
+                    if node is None:
+                        # Prompt finished
                         break
+                    current_node = node
+                    node_start = now
             time.sleep(COMFY_POLLING_INTERVAL_MS / 1000)
     finally:
         ws.close()
+    return node_timings
 
 
 def collect_outputs(prompt_id):
@@ -142,7 +157,7 @@ def handler(job):
     result = queue_prompt(workflow, client_id)
     prompt_id = result["prompt_id"]
 
-    wait_for_prompt(client_id, prompt_id)
+    node_timings = wait_for_prompt(client_id, prompt_id)
 
     outputs = collect_outputs(prompt_id)
 
@@ -157,6 +172,7 @@ def handler(job):
         "status": "success",
         "images": imgs,
         "videos": videos,
+        "node_timings": node_timings,
     }
 
 
