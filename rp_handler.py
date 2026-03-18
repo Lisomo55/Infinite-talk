@@ -66,10 +66,8 @@ def get_history(prompt_id):
         return json.loads(r.read())
 
 
-def wait_for_prompt(client_id, prompt_id):
+def wait_for_prompt(ws, prompt_id):
     """Wait for prompt to complete. Returns dict of node_id -> elapsed_seconds."""
-    ws = websocket.WebSocket()
-    ws.connect(f"ws://{COMFY_HOST}/ws?clientId={client_id}")
     node_timings = {}
     current_node = None
     node_start = None
@@ -154,10 +152,15 @@ def handler(job):
     upload_images(images)
 
     client_id = str(uuid.uuid4())
+
+    # Connect to WebSocket BEFORE submitting so we don't miss early node events
+    ws = websocket.WebSocket()
+    ws.connect(f"ws://{COMFY_HOST}/ws?clientId={client_id}")
+
     result = queue_prompt(workflow, client_id)
     prompt_id = result["prompt_id"]
 
-    node_timings = wait_for_prompt(client_id, prompt_id)
+    node_timings = wait_for_prompt(ws, prompt_id)
 
     outputs = collect_outputs(prompt_id)
 
